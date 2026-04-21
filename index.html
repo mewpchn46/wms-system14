@@ -1704,13 +1704,16 @@ async function syncFromSheets() {
 }
 
 // Hook รับสินค้า
-const _origSaveInbound = window.saveInbound;
-if (typeof saveStockIn === 'function') {
-  const _orig = saveStockIn;
-  window.saveStockIn = function(...args) {
-    const result = _orig.apply(this, args);
-    const inbound = JSON.parse(localStorage.getItem('wms_inbound') || '[]');
-    syncToSheets('syncAll', { inbound, outbound: JSON.parse(localStorage.getItem('wms_outdocs')||'[]'), movements: JSON.parse(localStorage.getItem('wms_movements')||'[]') });
+if (typeof saveInbound === 'function') {
+  const _origIn = saveInbound;
+  window.saveInbound = function(...args) {
+    const result = _origIn.apply(this, args);
+    setTimeout(() => {
+      const inbound = JSON.parse(localStorage.getItem('wms_inbound') || '[]');
+      const outbound = JSON.parse(localStorage.getItem('wms_outdocs') || '[]');
+      const movements = JSON.parse(localStorage.getItem('wms_movements') || '[]');
+      syncToSheets('syncAll', { inbound, outbound, movements });
+    }, 500);
     return result;
   };
 }
