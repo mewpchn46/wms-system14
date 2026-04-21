@@ -1726,8 +1726,6 @@ if (typeof saveStockOut === 'function') {
   };
 }
 
-setInterval(syncFromSheets, 15000);
-syncFromSheets();
     // Badge แสดงสถานะ
 function showSyncBadge(text, color) {
   let b = document.getElementById('wms-sync-badge');
@@ -1753,7 +1751,7 @@ window.syncFromSheets = async function() {
     showSyncBadge('🔴 Sync Error', '#ea4335');
   }
 };
-
+setInterval(syncFromSheets, 15000);
 syncFromSheets();
 </script>
 
