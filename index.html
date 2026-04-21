@@ -1728,6 +1728,33 @@ if (typeof saveStockOut === 'function') {
 
 setInterval(syncFromSheets, 15000);
 syncFromSheets();
+    // Badge แสดงสถานะ
+function showSyncBadge(text, color) {
+  let b = document.getElementById('wms-sync-badge');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'wms-sync-badge';
+    b.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;padding:8px 14px;border-radius:20px;font-size:12px;font-weight:600;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer;font-family:sans-serif;transition:background .3s';
+    b.onclick = () => syncFromSheets();
+    document.body.appendChild(b);
+  }
+  b.style.background = color;
+  b.textContent = text;
+}
+
+// แก้ syncFromSheets ให้แสดง badge
+const _origSync = syncFromSheets;
+window.syncFromSheets = async function() {
+  showSyncBadge('🔄 กำลัง Sync...', '#1a73e8');
+  try {
+    await _origSync();
+    showSyncBadge('🟢 Synced ' + new Date().toLocaleTimeString('th-TH'), '#34a853');
+  } catch(e) {
+    showSyncBadge('🔴 Sync Error', '#ea4335');
+  }
+};
+
+syncFromSheets();
 </script>
 
 </body>
