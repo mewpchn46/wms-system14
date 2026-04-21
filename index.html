@@ -1676,5 +1676,59 @@ function onScanSuccess(code){
 function closeScanner(){document.getElementById('scanner-modal').classList.add('hidden');if(html5QrCode){html5QrCode.stop().catch(()=>{});html5QrCode=null}}
 document.getElementById('scanner-modal').addEventListener('click',function(e){if(e.target===this)closeScanner()});
 </script>
+
+  <script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyjZJTMJ8dJPulOaqj_klZak5l28PlZksWLwlaD5aPEEHr-eib1Ph9lsiU1Iv-YnxyYmA/exec';
+
+async function syncToSheets(action, payload) {
+  try {
+    await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action, payload })
+    });
+  } catch(e) {}
+}
+
+async function syncFromSheets() {
+  try {
+    const r = await fetch(GAS_URL + '?action=getAll');
+    const j = await r.json();
+    if (!j.ok) return;
+    if (j.data.inbound && j.data.inbound.length > 0)
+      localStorage.setItem('wms_inbound', JSON.stringify(j.data.inbound));
+    if (j.data.outbound && j.data.outbound.length > 0)
+      localStorage.setItem('wms_outdocs', JSON.stringify(j.data.outbound));
+    if (j.data.movements && j.data.movements.length > 0)
+      localStorage.setItem('wms_movements', JSON.stringify(j.data.movements));
+  } catch(e) {}
+}
+
+// Hook รับสินค้า
+const _origSaveInbound = window.saveInbound;
+if (typeof saveStockIn === 'function') {
+  const _orig = saveStockIn;
+  window.saveStockIn = function(...args) {
+    const result = _orig.apply(this, args);
+    const inbound = JSON.parse(localStorage.getItem('wms_inbound') || '[]');
+    syncToSheets('syncAll', { inbound, outbound: JSON.parse(localStorage.getItem('wms_outdocs')||'[]'), movements: JSON.parse(localStorage.getItem('wms_movements')||'[]') });
+    return result;
+  };
+}
+
+// Hook เบิกสินค้า
+if (typeof saveStockOut === 'function') {
+  const _orig2 = saveStockOut;
+  window.saveStockOut = function(...args) {
+    const result = _orig2.apply(this, args);
+    const outbound = JSON.parse(localStorage.getItem('wms_outdocs') || '[]');
+    syncToSheets('syncAll', { inbound: JSON.parse(localStorage.getItem('wms_inbound')||'[]'), outbound, movements: JSON.parse(localStorage.getItem('wms_movements')||'[]') });
+    return result;
+  };
+}
+
+setInterval(syncFromSheets, 15000);
+syncFromSheets();
+</script>
+
 </body>
 </html>
