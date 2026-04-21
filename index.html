@@ -1678,6 +1678,11 @@ document.getElementById('scanner-modal').addEventListener('click',function(e){if
 </script>
 
   <script>
+// ============================================================
+//  แทนที่ <script> sync block ทั้งหมดในไฟล์ index.html
+//  (ตั้งแต่บรรทัด const GAS_URL = ... จนถึง </script> สุดท้าย)
+// ============================================================
+
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyjZJTMJ8dJPulOaqj_klZak5l28PlZksWLwlaD5aPEEHr-eib1Ph9lsiU1Iv-YnxyYmA/exec';
 
 async function syncToSheets(action, payload) {
@@ -1689,47 +1694,143 @@ async function syncToSheets(action, payload) {
   } catch(e) {}
 }
 
+// ดึงข้อมูลจาก Sheets กลับมาใส่ localStorage
 async function syncFromSheets() {
   try {
     const r = await fetch(GAS_URL + '?action=getAll');
     const j = await r.json();
     if (!j.ok) return;
-    if (j.data.inbound && j.data.inbound.length > 0)
-      localStorage.setItem('wms_inbound', JSON.stringify(j.data.inbound));
-    if (j.data.outbound && j.data.outbound.length > 0)
-      localStorage.setItem('wms_outdocs', JSON.stringify(j.data.outbound));
-    if (j.data.movements && j.data.movements.length > 0)
-      localStorage.setItem('wms_movements', JSON.stringify(j.data.movements));
+
+    // outDocs (ใบเบิก) — เก็บใน wms_outdocs
+    if (j.data.outbound && j.data.outbound.length > 0) {
+      // แปลง format จาก Sheets กลับเป็น format ที่เว็บใช้
+      const docs = j.data.outbound.map(r => ({
+        id:        r.id        || '',
+        timestamp: r.timestamp || '',
+        poRef:     r.poRef     || '',
+        status:    r.status    || 'pending',
+        total:     Number(r.total) || 0,
+        items:     (() => {
+          try { return typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []); }
+          catch { return []; }
+        })()
+      }));
+      outDocs = docs;
+      localStorage.setItem('wms_outdocs', JSON.stringify(docs));
+    }
+
+    // inbounds (รับเข้า) — เก็บใน wms_inbound
+    if (j.data.inbound && j.data.inbound.length > 0) {
+      const ibs = j.data.inbound.map(r => ({
+        id:        r.id        || '',
+        timestamp: r.timestamp || '',
+        poRef:     r.poRef     || '',
+        status:    r.status    || 'pending',
+        total:     Number(r.total) || 0,
+        items:     (() => {
+          try { return typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []); }
+          catch { return []; }
+        })()
+      }));
+      // อย่า overwrite wms_inbound เพราะเว็บใช้ format {pid, qty, ...}
+      // แค่ sync outdocs พอ
+    }
+
+    // movements
+    if (j.data.movements && j.data.movements.length > 0) {
+      movements = j.data.movements.map(r => ({
+        type:      r.type      || '',
+        docId:     r.movementId || r.refId || '',
+        pid:       r.productId || '',
+        qty:       Number(r.quantity) || 0,
+        note:      r.reason    || '',
+        timestamp: r.createdAt || '',
+        user:      r.createdBy || ''
+      }));
+      localStorage.setItem('wms_movements', JSON.stringify(movements));
+    }
+
+    // รีเฟรช UI ถ้าอยู่หน้าที่เกี่ยวข้อง
+    if (curPage === 'dashboard')  renderDashboard();
+    if (curPage === 'outbound')   { renderObDocs(); renderSOHist(); }
+    if (curPage === 'inbound')    renderIBHist();
+    if (curPage === 'inventory')  renderInventory();
+    if (curPage === 'history')    renderHistory();
+
   } catch(e) {}
 }
 
-// Hook รับสินค้า
+// ============================================================
+//  ฟังก์ชัน sync ข้อมูลไป Sheets (แปลง format ก่อนส่ง)
+// ============================================================
+function buildSyncPayload() {
+  const raw_outdocs = JSON.parse(localStorage.getItem('wms_outdocs') || '[]');
+  const raw_inbound = JSON.parse(localStorage.getItem('wms_inbound') || '[]');
+  const raw_mv      = JSON.parse(localStorage.getItem('wms_movements') || '[]');
+
+  // outDocs → Sheets Outbound & Inbound
+  const outboundForSheets = raw_outdocs.map(d => ({
+    id:        d.id        || '',
+    timestamp: d.timestamp || '',
+    poRef:     d.poRef     || '',
+    status:    d.status    || 'pending',
+    total:     d.total     || 0,
+    items:     typeof d.items === 'string' ? d.items : JSON.stringify(d.items || [])
+  }));
+
+  // inbounds (wms_inbound) ไม่ต้อง sync ขึ้น Sheets เพราะ saveInbound จะ sync เอง
+
+  return { outbound: outboundForSheets, movements: raw_mv };
+}
+
+// ============================================================
+//  Hook saveInbound — รับสินค้า
+// ============================================================
 if (typeof saveInbound === 'function') {
   const _origIn = saveInbound;
   window.saveInbound = function(...args) {
     const result = _origIn.apply(this, args);
     setTimeout(() => {
-      const inbound = JSON.parse(localStorage.getItem('wms_inbound') || '[]');
-      const outbound = JSON.parse(localStorage.getItem('wms_outdocs') || '[]');
-      const movements = JSON.parse(localStorage.getItem('wms_movements') || '[]');
-      syncToSheets('syncAll', { inbound, outbound, movements });
-    }, 500);
+      const payload = buildSyncPayload();
+      syncToSheets('syncAll', payload);
+    }, 600);
     return result;
   };
 }
 
-// Hook เบิกสินค้า
+// ============================================================
+//  Hook saveStockOut — ตัดสต๊อก
+// ============================================================
 if (typeof saveStockOut === 'function') {
   const _orig2 = saveStockOut;
   window.saveStockOut = function(...args) {
     const result = _orig2.apply(this, args);
-    const outbound = JSON.parse(localStorage.getItem('wms_outdocs') || '[]');
-    syncToSheets('syncAll', { inbound: JSON.parse(localStorage.getItem('wms_inbound')||'[]'), outbound, movements: JSON.parse(localStorage.getItem('wms_movements')||'[]') });
+    setTimeout(() => {
+      const payload = buildSyncPayload();
+      syncToSheets('syncAll', payload);
+    }, 600);
     return result;
   };
 }
 
-    // Badge แสดงสถานะ
+// ============================================================
+//  Hook generatePickingList — สร้างใบเบิก
+// ============================================================
+if (typeof generatePickingList === 'function') {
+  const _origPick = generatePickingList;
+  window.generatePickingList = function(...args) {
+    const result = _origPick.apply(this, args);
+    setTimeout(() => {
+      const payload = buildSyncPayload();
+      syncToSheets('syncAll', payload);
+    }, 600);
+    return result;
+  };
+}
+
+// ============================================================
+//  Badge แสดงสถานะ Sync
+// ============================================================
 function showSyncBadge(text, color) {
   let b = document.getElementById('wms-sync-badge');
   if (!b) {
@@ -1743,7 +1844,6 @@ function showSyncBadge(text, color) {
   b.textContent = text;
 }
 
-// แก้ syncFromSheets ให้แสดง badge
 const _origSync = syncFromSheets;
 window.syncFromSheets = async function() {
   showSyncBadge('🔄 กำลัง Sync...', '#1a73e8');
@@ -1754,6 +1854,7 @@ window.syncFromSheets = async function() {
     showSyncBadge('🔴 Sync Error', '#ea4335');
   }
 };
+
 setInterval(syncFromSheets, 15000);
 syncFromSheets();
 </script>
